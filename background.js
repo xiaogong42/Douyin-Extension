@@ -65,6 +65,34 @@ function computeRemainingMs(timer) {
 }
 
 // ----------------------------------------------------------------------------
+// 一点五、任务队列（串行化装置）—— 修复竞态的关键
+// ----------------------------------------------------------------------------
+// 问题回顾：关闭抖音页的瞬间，多个事件几乎同时触发多个 async 函数，
+// 它们各自"读状态 → 计算 → 写回"，交错执行时后写的会把先写的覆盖掉
+// （比如"清空"被"写入暂停态"覆盖，导致剩 6 分钟被记住）。
+//
+// 解决办法：所有会修改状态的操作都必须排队，一次只允许一个在跑。
+// 原理类似 C++ 里给临界区上互斥锁，但 JS 单线程下用 Promise 链就能实现：
+// 每个新任务都"接"在上一个任务完成之后才开始执行，物理上不可能交错。
+//
+// taskQueue 是"队尾指针"：永远指向队列中最后一个任务。
+// 初始值是一个"立刻就完成"的空 Promise，代表队列一开始是空的。
+let taskQueue = Promise.resolve();
+
+// 把一个函数排进队列执行，返回它的 Promise（调用者可以选择等结果）。
+function runSerialized(taskFn) {
+  // .then(taskFn) 的意思：等队列里前面所有任务完成后，才轮到 taskFn 执行
+  const result = taskQueue.then(taskFn);
+  // 更新队尾指针，让下一个任务排在 result 之后
+  // .catch(() => {}) 有两个作用：
+  //   1. 吞掉上一个任务的报错，避免一个任务出错导致整条队列卡死
+  //   2. 防止"未处理的 Promise 拒绝"警告
+  taskQueue = result.catch(() => {});
+  // 把当前任务的 Promise 返回给调用者
+  return result;
+}
+
+// ----------------------------------------------------------------------------
 // 二、核心动作：开始新一轮 / 定闹钟 / 暂停恢复 / 进入提醒
 // ----------------------------------------------------------------------------
 
@@ -181,22 +209,40 @@ async function evaluateActivity() {
   await updateBadge();
 }
 
-// 检查"浏览器里还有没有抖音标签页"。
-// 这决定了"关闭所有抖音页 → 计时终止"和"重新打开 → 重新开始一轮"两个需求。
-async function checkDouyinPresence() {
-  // 查询所有网址匹配抖音的标签页（这个查询需要 manifest 里的 host_permissions）
+// ============================================================================
+// 唯一的状态核对入口：reconcile（合并了原来的 checkDouyinPresence）
+// ----------------------------------------------------------------------------
+// 修复竞态的第二招：单一入口。
+// 之前 evaluateActivity 和 checkDouyinPresence 是两个独立函数，
+// 关页瞬间它们各跑各的，交错写入互相覆盖。
+// 现在所有事件都只触发这一个函数，它内部严格按顺序执行三步检查，
+// 并且每一步都是"查完立刻用"，中间不会跳出去干别的。
+// 再配合外层的 runSerialized 排队，物理上杜绝了交错。
+// ============================================================================
+async function reconcile() {
+  // 第一步：数一数浏览器里还有几个抖音标签页
+  // （这个查询需要 manifest 里的 host_permissions）
   const douyinTabs = await chrome.tabs.query({ url: "*://*.douyin.com/*" });
 
   if (douyinTabs.length === 0) {
     // 一个抖音页都没有了 → 清空倒计时状态（需求：关闭网页计时停止）
-    await setState(null);
-    // 闹钟也取消掉
-    await chrome.alarms.clear("deadline");
+    // 先读后写：只有状态确实还存在时才执行清空，避免重复无效写入
+    const timer = await getState();
+    if (timer) {
+      // 写入 null 表示"没有倒计时"
+      await setState(null);
+      // 闹钟也取消掉
+      await chrome.alarms.clear("deadline");
+    }
     await updateBadge();
+    // ★ 关键：清空之后立刻 return 返回。
+    // 绝不允许执行流继续往下走到任何"写状态"的代码路径，
+    // 这就是"写前复查"的保险——即使有旧代码路径意外到达这里，
+    // 也不可能把已清空的状态再覆盖回去。
     return;
   }
 
-  // 还有抖音页。看看倒计时是否存在
+  // 第二步：还有抖音页。看看倒计时是否存在
   const timer = await getState();
   if (!timer) {
     // 之前被清空过（用户关掉又重新打开了抖音）→ 重新开始一轮
@@ -206,7 +252,7 @@ async function checkDouyinPresence() {
     return;
   }
 
-  // 倒计时还在 → 顺便核对一下计时/暂停状态是否正确
+  // 第三步：倒计时还在 → 核对计时/暂停状态是否正确
   await evaluateActivity();
 }
 
@@ -307,30 +353,33 @@ async function updateBadge() {
 // ----------------------------------------------------------------------------
 
 // 用户切换了标签页（在同一个窗口里点了另一个标签）→ 核对计时状态
+// 注意：统一通过 runSerialized 排队执行，并发事件不会交错
 chrome.tabs.onActivated.addListener(() => {
-  evaluateActivity();
+  runSerialized(reconcile);
 });
 
 // 某个标签页发生了变化（打开了新网址、加载完成等）→ 核对抖音页的存在
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   // 只在网址变化或加载完成时才检查，避免过于频繁
   if (changeInfo.url || changeInfo.status === "complete") {
-    checkDouyinPresence();
+    runSerialized(reconcile);
   }
 });
 
 // 某个标签页被关闭 → 核对抖音页是否全军覆没
+// （修复前：它和 onActivated 触发的两个函数并发交错，引发竞态；
+//   修复后：两个事件都排进同一条队列，一前一后顺序执行）
 chrome.tabs.onRemoved.addListener(() => {
-  checkDouyinPresence();
+  runSerialized(reconcile);
 });
 
 // 焦点切换到了别的窗口/别的软件 → 也核对计时状态
 // （额外福利：不仅切网页会暂停，切到微信、游戏等其他软件也会暂停）
 chrome.windows.onFocusChanged.addListener(() => {
-  evaluateActivity();
+  runSerialized(reconcile);
 });
 
-// 闹钟响了 → 处理到点逻辑
+// 闹钟响了 → 处理到点逻辑（enterReminding 会写状态，同样排队防交错）
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === "deadline") {
     // 到点闹钟：先确认状态还在计时
@@ -339,8 +388,8 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
     // 算出理论到点时刻
     const deadline = timer.lastActiveAt + timer.remainingMs;
     if (Date.now() >= deadline) {
-      // 真到点了 → 进入提醒
-      await enterReminding();
+      // 真到点了 → 进入提醒（排进队列执行）
+      await runSerialized(enterReminding);
     } else {
       // 还没到（中途调整过时间）→ 重新定一个闹钟
       scheduleDeadline(timer);
@@ -370,11 +419,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       // 先记住这个时长（关闭重开后自动重开新一轮时用它）
       await chrome.storage.local.set({ durationMs: message.durationMs });
       // 开始新一轮；是否马上计时取决于现在是否在看抖音
-      await startNewRound(message.durationMs, await isDouyinActive());
+      // （startNewRound 会写状态，排队执行；箭头函数标 async 才能用 await）
+      await runSerialized(async () => startNewRound(message.durationMs, await isDouyinActive()));
       sendResponse({ ok: true });
     } else if (message.type === "adjustRemaining") {
-      // 用户调整了剩余时间
-      await adjustRemaining(message.deltaMs);
+      // 用户调整了剩余时间（adjustRemaining 会写状态，排队执行）
+      await runSerialized(() => adjustRemaining(message.deltaMs)); // 排队执行，箭头函数本身不需要 async
       sendResponse({ ok: true });
     } else if (message.type === "setSoundEnabled") {
       // 用户切换了声音开关
@@ -382,8 +432,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({ ok: true });
     } else if (message.type === "reminderConfirm") {
       // 用户在提醒弹窗上点了"确认" → 自动开始下一轮（需求：自动循环同时长）
+      // （startNewRound 会写状态，排队执行）
       const settings = await getSettings();
-      await startNewRound(settings.durationMs, await isDouyinActive());
+      await runSerialized(async () => startNewRound(settings.durationMs, await isDouyinActive()));
       sendResponse({ ok: true });
     } else {
       // 未知消息类型
@@ -405,4 +456,5 @@ chrome.alarms.create("badgeTick", { periodInMinutes: 0.5 });
 
 // 后台脚本每次被唤醒时（浏览器重启、闹钟叫醒、事件触发），
 // 都核对一遍抖音页面的存在性，保证状态和现实一致。
-checkDouyinPresence();
+// （同样排队执行，和事件触发进入的是同一条队列）
+runSerialized(reconcile);
