@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "抖音倒计时提醒",
+  "version": "1.0.0",
+  "description": "刷抖音网页版时倒计时提醒：切走暂停、切回继续，刷新不断，关闭重开重新计时。",
+  "permissions": ["storage", "alarms"],
+  "host_permissions": ["*://*.douyin.com/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*.douyin.com/*"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "抖音倒计时提醒"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

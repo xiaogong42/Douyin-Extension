@@ -1,0 +1,89 @@
+/* ============================================================================
+   抖音倒计时提醒插件 —— 提醒弹窗样式（content.css）
+   这里的样式只作用于提醒弹窗，不会影响抖音页面本身的显示。
+   ============================================================================ */
+
+/* 最外层的全屏遮罩：盖住整个抖音页面，半透明黑色 */
+#dcy-overlay {
+  /* fixed = 固定在屏幕上，滚动页面它也不动 */
+  position: fixed;
+  /* inset:0 = 上下左右撑满整个屏幕 */
+  inset: 0;
+  /* 黑色半透明背景，0.72 表示 72% 不透明度，透出一点后面的抖音页面 */
+  background: rgba(0, 0, 0, 0.72);
+  /* flex 弹性布局，配合下面两行让卡片居中 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* z-index 是"层级"，用 JS 能设的最大值，保证盖在抖音所有内容之上 */
+  z-index: 2147483647;
+}
+
+/* 中间的白色提醒卡片 */
+.dcy-card {
+  /* 纯白背景 */
+  background: #ffffff;
+  /* 圆角边框 */
+  border-radius: 16px;
+  /* 内边距：上下 40px，左右 48px */
+  padding: 40px 48px;
+  /* 文字居中 */
+  text-align: center;
+  /* 卡片阴影，营造悬浮感 */
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+  /* 最宽 400px，防止在小窗口里太宽 */
+  max-width: 400px;
+}
+
+/* 顶部的大闹钟表情 */
+.dcy-emoji {
+  /* 字号 64px，够醒目 */
+  font-size: 64px;
+  /* 自己一行 */
+  line-height: 1;
+}
+
+/* "时间到！"标题 */
+.dcy-title {
+  /* 大字加粗 */
+  font-size: 28px;
+  font-weight: 700;
+  /* 上下留点空间 */
+  margin: 16px 0 8px;
+  /* 深黑色文字 */
+  color: #111111;
+}
+
+/* 说明文字 */
+.dcy-text {
+  /* 灰色小字 */
+  color: #666666;
+  font-size: 15px;
+  /* 每条说明之间留 6px */
+  margin: 6px 0;
+}
+
+/* "确认，开始下一轮"按钮 */
+.dcy-btn {
+  /* 按钮和上方文字隔开 24px */
+  margin-top: 24px;
+  /* 抖音品牌红的背景 */
+  background: #fe2c55;
+  /* 白色文字 */
+  color: #ffffff;
+  /* 去掉按钮默认边框 */
+  border: none;
+  /* 大一点的字 */
+  font-size: 17px;
+  /* 按钮内边距，撑得饱满些 */
+  padding: 14px 36px;
+  /* 圆角半径大到超过高度一半，就成了"胶囊"形状 */
+  border-radius: 999px;
+  /* 鼠标移上去变小手 */
+  cursor: pointer;
+}
+
+/* 鼠标悬停在按钮上时：颜色加深一点，提示"可以点" */
+.dcy-btn:hover {
+  background: #e0264b;
+}

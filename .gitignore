@@ -1,0 +1,11 @@
+# WorkBuddy 本地数据（不需要上传到 GitHub）
+.workbuddy/
+
+# 系统文件
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# 编辑器
+.vscode/
+.idea/

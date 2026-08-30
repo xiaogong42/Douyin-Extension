@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<!-- ↑ 告诉浏览器这是一个 HTML5 网页文件 -->
+<html lang="zh-CN">
+  <head>
+    <!-- 声明文件编码是 UTF-8，保证中文不乱码 -->
+    <meta charset="UTF-8" />
+    <!-- 引入弹窗的样式表 -->
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <!-- 顶部标题 -->
+    <h1>抖音倒计时</h1>
+
+    <!-- 状态卡片：显示当前状态和剩余时间 -->
+    <div id="status-card">
+      <!-- 状态文字（计时中/已暂停/提醒中/未开始），由 popup.js 动态更新 -->
+      <div id="state-label">加载中…</div>
+      <!-- 大号剩余时间显示（如 09:32），由 popup.js 动态更新 -->
+      <div id="remaining">--:--</div>
+    </div>
+
+    <!-- 区域标题：快捷预设 -->
+    <div class="section-title">选择时长开始</div>
+    <!-- 预设档位按钮，data-min 属性里写死了分钟数，popup.js 会去读它 -->
+    <div id="preset-row">
+      <button class="preset" data-min="5">5 分钟</button>
+      <button class="preset" data-min="10">10 分钟</button>
+      <button class="preset" data-min="15">15 分钟</button>
+      <button class="preset" data-min="30">30 分钟</button>
+      <button class="preset" data-min="60">60 分钟</button>
+    </div>
+
+    <!-- 区域标题：自定义 -->
+    <div class="section-title">或自定义（分钟）</div>
+    <!-- 自定义输入行：数字输入框 + 开始按钮 -->
+    <div id="custom-row">
+      <!-- type="number" 数字输入框，范围 1~480 分钟，默认填 20 -->
+      <input
+        id="custom-minutes"
+        type="number"
+        min="1"
+        max="480"
+        value="20"
+      />
+      <!-- 点击后按输入框里的分钟数开始倒计时 -->
+      <button id="custom-start">开始</button>
+    </div>
+
+    <!-- 区域标题：调整剩余时间（倒计时进行中才有意义） -->
+    <div class="section-title">调整剩余时间</div>
+    <!-- 四个调整按钮，data-delta 是增减的分钟数（负数为减） -->
+    <div id="adjust-row">
+      <button class="adjust" data-delta="-5">-5分</button>
+      <button class="adjust" data-delta="-1">-1分</button>
+      <button class="adjust" data-delta="1">+1分</button>
+      <button class="adjust" data-delta="5">+5分</button>
+    </div>
+
+    <!-- 声音提醒开关（需求：声音可关闭），checked 表示默认开启 -->
+    <label id="sound-row">
+      <input type="checkbox" id="sound-toggle" checked />
+      声音提醒
+    </label>
+
+    <!-- 底部小字提示 -->
+    <div id="tip">提示：只在抖音标签页处于前台时计时</div>
+
+    <!-- 引入弹窗的逻辑脚本（必须放在 body 末尾，保证先加载完界面再跑脚本） -->
+    <script src="popup.js"></script>
+  </body>
+</html>

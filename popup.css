@@ -1,0 +1,159 @@
+/* ============================================================================
+   抖音倒计时提醒插件 —— 设置弹窗样式（popup.css）
+   只作用于点击扩展图标后弹出的小窗口。
+   ============================================================================ */
+
+/* 通配符 *：对所有元素生效，统一清掉浏览器默认的边距，布局更可控 */
+* {
+  margin: 0;
+  padding: 0;
+  /* border-box 让"宽度=内容+内边距+边框"，写宽高时不用心算 */
+  box-sizing: border-box;
+}
+
+/* 弹窗整体 */
+body {
+  /* 固定宽度 300px（浏览器扩展弹窗不能自适应，必须写死） */
+  width: 300px;
+  /* 内边距 16px，内容不贴边 */
+  padding: 16px;
+  /* 字体：微软雅黑兜底 */
+  font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+  /* 白色背景、深色文字 */
+  background: #ffffff;
+  color: #111111;
+}
+
+/* 顶部标题 */
+h1 {
+  font-size: 16px;
+  /* 底部留 12px 空隙 */
+  margin-bottom: 12px;
+}
+
+/* 状态卡片（灰底圆角的一块） */
+#status-card {
+  /* 浅灰背景 */
+  background: #f7f7f8;
+  /* 圆角 */
+  border-radius: 12px;
+  /* 内边距 */
+  padding: 14px;
+  /* 文字居中 */
+  text-align: center;
+  /* 底部留 12px 空隙 */
+  margin-bottom: 12px;
+}
+
+/* 状态那一行小字（计时中/已暂停…） */
+#state-label {
+  font-size: 12px;
+  /* 灰色 */
+  color: #888888;
+  /* 底部留 4px */
+  margin-bottom: 4px;
+}
+
+/* 剩余时间的大数字 */
+#remaining {
+  font-size: 36px;
+  font-weight: 700;
+  /* 等宽数字：秒数跳动时不会左右抖动 */
+  font-variant-numeric: tabular-nums;
+}
+
+/* 区域小标题（"选择时长开始"这类） */
+.section-title {
+  font-size: 12px;
+  color: #999999;
+  /* 上方 12px 下方 6px 的间距 */
+  margin: 12px 0 6px;
+}
+
+/* 预设按钮那一排：3 列网格 */
+#preset-row {
+  display: grid;
+  /* 每列等宽，3 列；5 个按钮会自动换成两行 */
+  grid-template-columns: repeat(3, 1fr);
+  /* 按钮之间留 6px 缝隙 */
+  gap: 6px;
+}
+
+/* 所有按钮的通用样式 */
+button {
+  /* 按下需要一点高度 */
+  padding: 10px 0;
+  /* 去掉默认边框 */
+  border: 1px solid #dddddd;
+  /* 白底深字 */
+  background: #ffffff;
+  color: #222222;
+  /* 圆角 */
+  border-radius: 8px;
+  /* 字号 14px */
+  font-size: 14px;
+  /* 小手光标 */
+  cursor: pointer;
+}
+
+/* 鼠标悬停时按钮变色 */
+button:hover {
+  /* 浅红背景 */
+  background: #fff1f4;
+  /* 边框变成抖音红 */
+  border-color: #fe2c55;
+  /* 文字变红 */
+  color: #fe2c55;
+}
+
+/* 自定义输入行：横向排列 */
+#custom-row {
+  display: flex;
+  /* 框和按钮之间留 6px */
+  gap: 6px;
+}
+
+/* 数字输入框 */
+input[type="number"] {
+  /* 占满剩余宽度 */
+  flex: 1;
+  padding: 9px;
+  border: 1px solid #dddddd;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+/* 调整剩余时间的四个按钮：4 列网格 */
+#adjust-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+
+/* 声音开关那一行 */
+#sound-row {
+  /* 横向排列 */
+  display: flex;
+  /* 勾选框和文字垂直居中对齐 */
+  align-items: center;
+  /* 上方留 14px */
+  margin-top: 14px;
+  font-size: 14px;
+  /* 鼠标移上去有小手，提示可以点 */
+  cursor: pointer;
+}
+
+/* 勾选框本身和文字留点距离 */
+#sound-toggle {
+  margin-right: 8px;
+  /* 勾选框放大一点好点 */
+  width: 16px;
+  height: 16px;
+}
+
+/* 底部提示小字 */
+#tip {
+  font-size: 11px;
+  color: #aaaaaa;
+  margin-top: 12px;
+}
