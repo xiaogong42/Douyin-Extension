@@ -1,0 +1,445 @@
+# 抖音倒计时提醒插件 —— 教学讲解
+
+> 目标读者：完全不会 JS，但会 C++/Python。  
+> 目标：读完这篇后能看懂这个插件在做什么，并知道怎么改。
+
+---
+
+## 一、整体架构：插件由哪几部分组成
+
+这个插件一共 6 个核心文件 + 1 个图标生成脚本：
+
+```
+\
+├── manifest.json      ← 扩展的"身份证"，告诉浏览器它是什么
+├── background.js      ← 后台总指挥（计时逻辑、存数据、监听标签切换）
+├── content.js         ← 注入到抖音页面的"特工"（负责弹窗和声音）
+├── content.css        ← 特工的服装（弹窗样式）
+├── popup.html         ← 点击扩展图标弹出的设置小窗口
+├── popup.css          ← 设置小窗口的样式
+├── popup.js           ← 设置小窗口的交互逻辑
+├── make_icons.py      ← 生成图标的 Python 脚本（一次生成可重复使用）
+└── icons/             ← 图标目录
+    ├── icon16.png
+    ├── icon48.png
+    └── icon128.png
+```
+
+对应到浏览器的 3 个角色：
+
+| 角色 | 文件 | 职责 | 生命周期 |
+|---|---|---|---|
+| **background（后台脚本）** | `background.js` | 计时核心、数据存储、监听事件 | 浏览器启动后后台常驻，但空闲会被暂停，事件触发时唤醒 |
+| **content script（内容脚本）** | `content.js` + `content.css` | 在抖音页面里显示提醒弹窗、播放声音 | 随抖音页面打开/关闭 |
+| **popup（弹窗）** | `popup.html` + `popup.js` + `popup.css` | 给用户设置时长、调整时间、开关声音 | 点图标时出现，关闭即消失 |
+
+---
+
+## 二、最重要的 6 件事
+
+这是整个插件的灵魂，先记住这 6 条，后面看代码就不会晕。
+
+### 1. 计时逻辑放在后台脚本，而不是放在抖音页面里
+这是为了能实现"刷新不断、关闭清空"。  
+如果计时逻辑在 `content.js` 里，网页刷新时这个脚本会被销毁，倒计时跟着消失。  
+放在 `background.js` + `chrome.storage.local` 里，数据存在浏览器层面，网页刷新或切换都不影响。
+
+### 2. 用 "lastActiveAt + remainingMs" 模型实现暂停/继续
+我没有用一个"每隔 1 秒 +1"的定时器，而是存了三个数：
+
+- `remainingMs`：当前还剩多少毫秒
+- `lastActiveAt`：上一次开始计时的时刻（时间戳）
+- `state`：`running` / `paused` / `reminding`
+
+**好处：**
+
+- 切走时：把已经流走的时间从 `remainingMs` 扣掉，`state = paused`，不需要一直跑定时器；
+- 切回时：把 `lastActiveAt = 现在`，重新定一个到点闹钟；
+- 刷新时：直接读 storage 里的状态，不需要额外修复。
+
+### 3. 用 `chrome.alarms` 而不是 `setInterval`
+后台脚本会被浏览器休眠。  
+如果你写 `setInterval(()=>{...}, 1000)`，后台一休眠，这个定时器就死了。  
+`chrome.alarms` 是浏览器级别的闹钟，到点会主动把后台脚本叫醒，**绝对可靠**。  
+这也是 MV3 扩展的推荐做法。
+
+### 4. "刷新不断"其实是免费的
+之前你问：刷新不断要不要特意设置？
+
+**结论：刷新不断是默认行为，反而更简单；刷新就中断才需要多写代码。**
+
+因为状态存在 `chrome.storage` 里，并且后台脚本的 `evaluateActivity()` 在页面加载/刷新事件里会自动把状态读回来。  
+如果你硬要实现"刷新就中断"，反而要检测"当前是刷新而不是关闭"，这更麻烦。
+
+### 5. 声音不依赖音频文件，用 Web Audio API 现场合成
+提示音不是 mp3/wav 文件，而是 `content.js` 里用 `AudioContext + OscillatorNode` 现场生成一个 880Hz 的正弦波音。  
+这样整个插件除了图标外全是代码，不需要额外资源。
+
+### 6. 三个角色之间用消息传递沟通
+后台、页面、弹窗是 3 个独立环境，不能直接访问对方的变量。  
+它们通过 `chrome.runtime.sendMessage()` / `chrome.runtime.onMessage` 发消息，像进程间通信一样。  
+这一点和 C++ 里多线程/多进程通信很相似。
+
+---
+
+## 三、JS 零基础速成（只看本插件用到的）
+
+### 1. `const` / `let`
+
+```js
+const PI = 3.14;   // 常量，后面不能改
+let count = 0;     // 变量，后面可以改
+```
+
+### 2. 函数
+
+```js
+function add(a, b) {
+  return a + b;
+}
+```
+
+和 C++ 差不多，只是参数类型不用写。
+
+### 3. 箭头函数 & `async/await`
+
+```js
+async function getData() {
+  const data = await someAsyncCall();
+  return data;
+}
+```
+
+`async` 表示函数里有异步操作；`await` 表示"等这个异步操作完成后再继续"。  
+对应 C++ 里 `std::future` 或协程的概念，只是语法更简单。
+
+### 4. 对象与数组
+
+```js
+const person = { name: "KG", age: 21 };  // 对象 ≈ struct
+const arr = [1, 2, 3];                   // 数组
+arr.forEach((x) => console.log(x));      // 遍历数组
+```
+
+### 5. `Date.now()`
+
+返回当前时间戳，单位是毫秒，和 C 语言里的 `time(nullptr)*1000` 类似。
+
+### 6. `document.getElementById / createElement / addEventListener`
+
+```js
+const btn = document.getElementById("myBtn");
+btn.addEventListener("click", () => {
+  alert("被点了");
+});
+```
+
+这是操作网页界面的 API。
+
+---
+
+## 四、文件逐个走读
+
+### `manifest.json`
+
+```json
+{
+  "manifest_version": 3,
+  "name": "抖音倒计时提醒",
+  "version": "1.0.0",
+  "description": "刷抖音网页版时倒计时提醒：切走暂停、切回继续，刷新不断，关闭重开重新计时。",
+  "permissions": ["storage", "alarms"],
+  "host_permissions": ["*://*.douyin.com/*"],
+  ...
+}
+```
+
+每行含义：
+
+- `manifest_version: 3`：告诉 Edge/Chrome 这是新版扩展格式。
+- `permissions`：扩展要向浏览器申请的权限。  
+  - `storage`：用来存倒计时状态和用户设置。  
+  - `alarms`：用来设定精确闹钟。
+- `host_permissions`：扩展允许访问哪些网站。这里写了 `*://*.douyin.com/*`，匹配所有抖音页面。
+- `background.service_worker`：指定后台脚本是 `background.js`。
+- `content_scripts`：指定在抖音页面里注入哪些脚本和样式。
+- `action.default_popup`：点扩展图标时显示的弹窗。
+- `icons`：扩展图标的 16/48/128 像素版本。
+
+### `background.js`
+
+这是整个插件的 CPU。按执行顺序看：
+
+#### 常量与工具函数
+
+```js
+const DEFAULT_DURATION_MS = 10 * 60 * 1000;
+```
+
+- 默认一轮 10 分钟。1000 毫秒 = 1 秒，所以 `10 * 60 * 1000` = 600000。
+
+```js
+function isDouyinTab(tab) {
+  return Boolean(tab.url && tab.url.includes("douyin.com"));
+}
+```
+
+- 判断一个 tab 是不是抖音页。`tab.url` 可能有也可能没有，所以先 `&&` 保险。
+
+```js
+async function getState() { ... }
+async function setState(next) { ... }
+async function getSettings() { ... }
+```
+
+- 三个对 `chrome.storage.local` 的读写函数。数据持久化靠它们。
+
+```js
+function computeRemainingMs(timer) { ... }
+```
+
+- 如果正在计时，就根据 `lastActiveAt` 计算当前真实剩余时间。
+
+#### 核心流程
+
+```js
+async function startNewRound(durationMs, activeNow) { ... }
+```
+
+- 开启新一轮。`activeNow` 表示用户现在是否在看抖音。  
+- 如果在前台，`state = running` 并定一个到点闹钟；  
+- 如果不在前台，`state = paused` 只存状态。
+
+```js
+function scheduleDeadline(timer) { ... }
+```
+
+- 用 `chrome.alarms.create("deadline", { when: deadlineTime })` 定一个一次性闹钟。  
+- 到点会触发 `chrome.alarms.onAlarm` 监听器。
+
+```js
+async function isDouyinActive() { ... }
+```
+
+- 判断用户当前是否正在看抖音。它检查所有窗口，只认可"获得了焦点的窗口"里的激活标签页。
+
+```js
+async function evaluateActivity() { ... }
+```
+
+- 根据 `isDouyinActive()` 的结果，决定是把 `running` 改为 `paused`，还是把 `paused` 改为 `running`。
+
+```js
+async function reconcile() { ... }   // 由原 checkDouyinPresence 升级而来
+```
+
+- 唯一的状态核对入口，所有事件都触发它。  
+- 第一步查浏览器里还有没有抖音标签页：没有 → 清空状态并立刻返回（需求：关闭网页计时停止）；  
+- 有但状态为空 → 自动开始新一轮（需求：重新打开时重新计时）；  
+- 有且状态也在 → 交给 `evaluateActivity()` 核对走/停。
+
+```js
+let taskQueue = Promise.resolve();
+function runSerialized(taskFn) { ... }
+```
+
+- 任务队列（串行化装置）：所有会写状态的操作排队执行，一次只跑一个。  
+- 这是修复竞态 bug 的关键，详见第六节复盘。
+
+#### 事件监听
+
+```js
+chrome.tabs.onActivated.addListener(() => { runSerialized(reconcile); });
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => { ... });
+chrome.tabs.onRemoved.addListener(() => { runSerialized(reconcile); });
+chrome.windows.onFocusChanged.addListener(() => { runSerialized(reconcile); });
+```
+
+- 切换标签、页面变化、关闭标签、切换窗口时，统一排队执行 `reconcile()`。  
+- 注意：**所有事件走的是同一个入口、同一条队列**，这是防竞态的结构保证。
+
+```js
+chrome.alarms.onAlarm.addListener(async (alarm) => { ... });
+```
+
+- `deadline` 闹钟：到点就进入提醒。  
+- `badgeTick` 闹钟：每 30 秒刷新一次图标上的剩余分钟数。
+
+```js
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => { ... });
+```
+
+- 消息分发中心：处理 popup 和 content 发来的 `getStatus`、`startTimer`、`adjustRemaining`、`setSoundEnabled`、`reminderConfirm` 等命令。
+
+### `content.js`
+
+这个脚本被注入到抖音网页里。职责很简单：显示提醒。
+
+```js
+let soundLoopId = null;
+```
+
+- 记录声音循环的定时器编号。
+
+```js
+function playBeep() { ... }
+```
+
+- 用 `AudioContext` 合成一个 880Hz、0.8 秒、渐弱的"叮"声。
+
+```js
+function showReminder(soundEnabled) { ... }
+```
+
+- 在页面上插入一个全屏遮罩 + 中央卡片 + 确认按钮。  
+- 如果声音开启，立刻响一声，然后每 3 秒响一声，直到确认。
+
+```js
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => { ... });
+```
+
+- 监听后台发来的 `showReminder` 消息，收到就显示提醒。
+
+```js
+chrome.runtime.sendMessage({ type: "getStatus" }, (response) => { ... });
+```
+
+- 页面刚加载时（包括刷新），主动问后台状态。  
+- 如果此时已经是 `reminding`（比如用户在提醒弹窗时刷新了），就重新显示弹窗。
+
+### `popup.html` / `popup.css` / `popup.js`
+
+这三件套构成设置弹窗：
+
+- `popup.html` 负责界面骨架；
+- `popup.css` 负责样式；
+- `popup.js` 负责交互：
+  - 每隔 500ms 向后台要一次状态，刷新剩余时间；
+  - 点击预设按钮 → 发 `startTimer`；
+  - 输入自定义分钟 → 发 `startTimer`；
+  - 点击 +/- → 发 `adjustRemaining`；
+  - 勾选/取消声音 → 发 `setSoundEnabled`。
+
+---
+
+## 五、关键机制深挖
+
+### 1. 为什么状态放在 `chrome.storage.local` 而不是普通变量？
+
+普通 JS 变量存在内存里，后台脚本一休眠或网页一刷新就没了。  
+`chrome.storage.local` 是浏览器提供的持久化存储，即使浏览器重启也不会丢。  
+本插件靠它实现了"刷新不断"和"关闭重开重新计时"。
+
+### 2. `chrome.alarms` 的精度
+
+文档规定最小间隔是 0.5 分钟（30 秒）。  
+我把它拆成两个闹钟：
+
+- `deadline`：一次性闹钟，精确到毫秒，负责到点提醒；
+- `badgeTick`：每 30 秒响一次的心跳闹钟，负责刷新图标。
+
+### 3. 声音开关是怎么传递到弹窗的？
+
+用户在 `popup.js` 里切换勾选框 → 发 `setSoundEnabled` 给后台 → 后台存到 `storage`。  
+到点提醒时，后台从 `storage` 读 `soundEnabled`，连同 `showReminder` 消息一起发给 `content.js`。  
+`content.js` 根据这个布尔值决定是否播放声音。
+
+---
+
+## 六、实战复盘：一次竞态 bug 的定位与修复（本项目最有价值的一课）
+
+### 现象
+
+倒计时剩 6 分钟时关闭抖音页，重新打开抖音后**从 6 分钟继续**，而不是按需求从头开始。只有重启浏览器后才恢复正常。同一个操作、两种结果——竞态的典型信号。
+
+### 根因
+
+关闭抖音页的瞬间，两个事件几乎同时触发两个 async 函数：
+
+- `onActivated/onFocusChanged` → `evaluateActivity()`：发现"没人在看抖音"，写入 `{ state: "paused", remainingMs: 6分钟 }`
+- `onRemoved` → `checkDouyinPresence()`：发现"一个抖音页都不剩"，写入 `null`（清空）
+
+JS 单线程，但 `await` 是**让出 CPU 的点**。两个函数交错执行：
+
+```
+evaluateActivity: 读到旧状态(running, 6分钟) → await 查窗口(让出) ...
+                                              checkDouyinPresence: 写入 null ✔ 清空成功
+evaluateActivity: 查完了, 写入 {paused, 6分钟} ✘ 把 null 覆盖了, 旧状态"复活"
+```
+
+这就是 C++ 里经典的**读-改-写竞争**（TOCTOU）：检查时和使用时，世界已经变了。
+
+### 修复（三招叠加）
+
+1. **单一入口**：把 `checkDouyinPresence` 升级为 `reconcile()`，所有事件只触发这一个函数，内部三步检查严格顺序执行，清空后立刻 `return`，杜绝执行流跑到其他写状态的路径。
+2. **任务队列串行化**（`runSerialized`）：就算两个事件同时触发 `reconcile`，它们排进同一条 Promise 链，一前一后执行，物理上不可能交错。等价于 C++ 的互斥锁。
+3. **写前复查**：清空前先 `getState()` 确认状态存在，减少无意义写入。
+
+### 修复后的时间线
+
+```
+onActivated 触发 → reconcile 排队 #1（可能写入 paused，没关系）
+onRemoved   触发 → reconcile 排队 #2 → 等 #1 完成后执行 → 查到 0 个抖音页 → 写入 null ✔
+最终状态：null，旧状态不可能再复活
+```
+
+### 学到什么
+
+- `await` 不只是"等待"，它是**线程可能被切换的点**——有 `await` 的代码就等于有并发。
+- 判断是不是竞态：**同样的操作，结果时好时坏**。确定性 bug 每次表现一致。
+- 修并发问题的万能思路：让冲突的操作**排队**（串行化），而不是各跑各的。
+
+## 七、常见问题 & 怎么改
+
+### Q1：我想把默认时长改成 25 分钟
+
+改 `background.js` 里的：
+
+```js
+const DEFAULT_DURATION_MS = 10 * 60 * 1000;
+```
+
+改成：
+
+```js
+const DEFAULT_DURATION_MS = 25 * 60 * 1000;
+```
+
+### Q2：我想把提示音改成更低沉一点
+
+改 `content.js` 里的：
+
+```js
+osc.frequency.value = 880;
+```
+
+数字越小越低沉，比如 `440` 是标准音 A，`220` 就更低。
+
+### Q3：我想把提醒弹窗文案改成"别再刷了"
+
+改 `content.js` 里 `card.innerHTML =` 那一串字符串。
+
+### Q4：倒计时还在，但我想临时把角标数字隐藏
+
+在 `background.js` 的 `updateBadge()` 里，把显示分钟数的逻辑删除或改成 `""`。
+
+### Q5：扩展改了代码，浏览器里没生效
+
+每次改完代码，需要去 `edge://extensions` 页面点扩展卡片上的**刷新**按钮，或者关闭再重新加载。
+
+---
+
+## 八、它和 C++ 程序的类比
+
+如果你用 C++ 写同一个功能，结构大概会是：
+
+| 本插件 | C++ 类比 |
+|---|---|
+| `background.js` | 后台服务进程 / daemon |
+| `content.js` | 注入目标进程的 DLL/HOOK |
+| `popup.js` | 客户端配置界面 |
+| `chrome.storage.local` | 本地 SQLite / 配置文件 |
+| `chrome.runtime.sendMessage` | 进程间 IPC |
+| `chrome.alarms` | 系统定时器 / cron |
+
+这样类比，应该能更快理解它在干什么。
